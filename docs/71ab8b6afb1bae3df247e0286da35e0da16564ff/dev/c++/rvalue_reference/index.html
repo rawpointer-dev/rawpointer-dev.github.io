@@ -1,0 +1,1434 @@
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+<meta name="generator" content="Hugo 0.88.1" /><META NAME="ROBOTS" CONTENT="INDEX, FOLLOW">
+
+
+<link rel="shortcut icon" href="/favicons/favicon.ico" >
+<link rel="apple-touch-icon" href="/favicons/apple-touch-icon-180x180.png" sizes="180x180">
+<link rel="icon" type="image/png" href="/favicons/favicon-16x16.png" sizes="16x16">
+<link rel="icon" type="image/png" href="/favicons/favicon-32x32.png" sizes="32x32">
+<link rel="icon" type="image/png" href="/favicons/android-36x36.png" sizes="36x36">
+<link rel="icon" type="image/png" href="/favicons/android-48x48.png" sizes="48x48">
+<link rel="icon" type="image/png" href="/favicons/android-72x72.png" sizes="72x72">
+<link rel="icon" type="image/png" href="/favicons/android-96x96.png" sizes="96x96">
+<link rel="icon" type="image/png" href="/favicons/android-144x144.png" sizes="144x144">
+<link rel="icon" type="image/png" href="/favicons/android-192x192.png" sizes="192x192">
+
+<title>右值引用 | RawPointer</title>
+
+
+  
+  <meta name="description" content="（一）、Rvalue References
+Rvalue References 是 C&#43;&#43;11 标准新增的内容。rvalue References 之所以难以理解，是因为很难说清楚设计出它的原因，或者说 rvalue references 是为了解决什么问题。所以， …">
+<meta property="og:title" content="右值引用" />
+<meta property="og:description" content="（一）、Rvalue References Rvalue References 是 C&#43;&#43;11 标准新增的内容。rvalue References 之所以难以理解，是因为很难说清楚设计出它的原因，或者说 rvalue references 是为了解决什么问题。所以，在本文中我将不会直接介绍什么是 rvalue references。而是首先介绍有什么问题需要解决， rvalue references 又是如何解决该问题的。
+Rvalue references 主要解决以下两个问题：
+ 实现 move 语义（move semantics） 完美转发（Perfect forwarding）  如果你对以上两个问题都不了解也没有关系，本文将会介绍这两个问题。首先介绍 move semantics。在介绍 move semantics 之前，我首先会介绍什么是 rvalue，什么是 lvalue。这两个概念严格定义很难，但是接下来的解释对我们理解后续内容就足够了。
+1.1 左值（lvalue）和 右值（rvalue） 在 C 语言时代，rvalue 和 lvalue 的解释如下：
+ lvalue 是一个 expression $e$，该 e 可以出现在赋值语句的左边或者右边。 rvalue 只能出现在赋值语句的右边。
+ 例如：
+1 2 3 4 5 6 7 8 9 10 11  int a = 42; int b = 43; // a and b are both l-values:  a = b; // ok  b = a; // ok  a = a * b; // ok  // a * b is an rvalue:  int c = a * b; // ok, rvalue on right hand side of assignment  a * b = 42; // error, rvalue on left hand side of assignment   在 C&#43;&#43; 语言中，以上定义能够直观的区分什么是 lvalue，什么是 rvalue。但是，如果是用户自定义数据类型，带入了可修改性和可分配性，那么就会导致该定义错误。我们没有必要深入探索该问题。" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="/docs/71ab8b6afb1bae3df247e0286da35e0da16564ff/dev/c&#43;&#43;/rvalue_reference/" /><meta property="article:section" content="docs" />
+
+<meta property="og:site_name" content="RawPointer" />
+
+<meta itemprop="name" content="右值引用">
+<meta itemprop="description" content="（一）、Rvalue References Rvalue References 是 C&#43;&#43;11 标准新增的内容。rvalue References 之所以难以理解，是因为很难说清楚设计出它的原因，或者说 rvalue references 是为了解决什么问题。所以，在本文中我将不会直接介绍什么是 rvalue references。而是首先介绍有什么问题需要解决， rvalue references 又是如何解决该问题的。
+Rvalue references 主要解决以下两个问题：
+ 实现 move 语义（move semantics） 完美转发（Perfect forwarding）  如果你对以上两个问题都不了解也没有关系，本文将会介绍这两个问题。首先介绍 move semantics。在介绍 move semantics 之前，我首先会介绍什么是 rvalue，什么是 lvalue。这两个概念严格定义很难，但是接下来的解释对我们理解后续内容就足够了。
+1.1 左值（lvalue）和 右值（rvalue） 在 C 语言时代，rvalue 和 lvalue 的解释如下：
+ lvalue 是一个 expression $e$，该 e 可以出现在赋值语句的左边或者右边。 rvalue 只能出现在赋值语句的右边。
+ 例如：
+1 2 3 4 5 6 7 8 9 10 11  int a = 42; int b = 43; // a and b are both l-values:  a = b; // ok  b = a; // ok  a = a * b; // ok  // a * b is an rvalue:  int c = a * b; // ok, rvalue on right hand side of assignment  a * b = 42; // error, rvalue on left hand side of assignment   在 C&#43;&#43; 语言中，以上定义能够直观的区分什么是 lvalue，什么是 rvalue。但是，如果是用户自定义数据类型，带入了可修改性和可分配性，那么就会导致该定义错误。我们没有必要深入探索该问题。">
+
+<meta itemprop="wordCount" content="2205">
+<meta itemprop="keywords" content="" /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="右值引用"/>
+<meta name="twitter:description" content="（一）、Rvalue References Rvalue References 是 C&#43;&#43;11 标准新增的内容。rvalue References 之所以难以理解，是因为很难说清楚设计出它的原因，或者说 rvalue references 是为了解决什么问题。所以，在本文中我将不会直接介绍什么是 rvalue references。而是首先介绍有什么问题需要解决， rvalue references 又是如何解决该问题的。
+Rvalue references 主要解决以下两个问题：
+ 实现 move 语义（move semantics） 完美转发（Perfect forwarding）  如果你对以上两个问题都不了解也没有关系，本文将会介绍这两个问题。首先介绍 move semantics。在介绍 move semantics 之前，我首先会介绍什么是 rvalue，什么是 lvalue。这两个概念严格定义很难，但是接下来的解释对我们理解后续内容就足够了。
+1.1 左值（lvalue）和 右值（rvalue） 在 C 语言时代，rvalue 和 lvalue 的解释如下：
+ lvalue 是一个 expression $e$，该 e 可以出现在赋值语句的左边或者右边。 rvalue 只能出现在赋值语句的右边。
+ 例如：
+1 2 3 4 5 6 7 8 9 10 11  int a = 42; int b = 43; // a and b are both l-values:  a = b; // ok  b = a; // ok  a = a * b; // ok  // a * b is an rvalue:  int c = a * b; // ok, rvalue on right hand side of assignment  a * b = 42; // error, rvalue on left hand side of assignment   在 C&#43;&#43; 语言中，以上定义能够直观的区分什么是 lvalue，什么是 rvalue。但是，如果是用户自定义数据类型，带入了可修改性和可分配性，那么就会导致该定义错误。我们没有必要深入探索该问题。"/>
+
+
+
+
+<link rel="preload" href="/scss/main.min.2d78baf432f5de75525925384c55a5f67abd05150f4dd32eed5790eb0a5ec4cd.css" as="style">
+<link href="/scss/main.min.2d78baf432f5de75525925384c55a5f67abd05150f4dd32eed5790eb0a5ec4cd.css" rel="stylesheet" integrity="">
+
+
+<script
+  src="https://code.jquery.com/jquery-3.5.1.min.js"
+  integrity="sha256-9/aliU8dGd2tb6OSsuzixeV4y/faTqgFtohetphbbj0="
+  crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+<script type="application/javascript">
+var doNotTrack = false;
+if (!doNotTrack) {
+	window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date;
+	ga('create', 'UA-00000000-0', 'auto');
+	
+	ga('send', 'pageview');
+}
+</script>
+<script async src='https://www.google-analytics.com/analytics.js'></script>
+
+
+
+
+  </head>
+  <body class="td-page">
+    <header>
+      
+<nav class="js-navbar-scroll navbar navbar-expand navbar-dark flex-column flex-md-row td-navbar">
+        <a class="navbar-brand" href="/">
+		<span class="navbar-logo"></span><span class="text-uppercase font-weight-bold">RawPointer</span>
+	</a>
+	<div class="td-navbar-nav-scroll ml-md-auto" id="main_navbar">
+		<ul class="navbar-nav mt-2 mt-lg-0">
+			
+			
+			<li class="nav-item mr-4 mb-2 mb-lg-0">
+				
+				
+				
+				
+				
+				
+				<a class="nav-link" href="/about/" ><i class='fa fa-heart'></i><span>About</span></a>
+			</li>
+			
+			<li class="nav-item mr-4 mb-2 mb-lg-0">
+				
+				
+				
+				
+				
+				
+				<a class="nav-link" href="/life/" ><i class='fa fa-camera'></i><span>Life</span></a>
+			</li>
+			
+			<li class="nav-item mr-4 mb-2 mb-lg-0">
+				
+				
+				
+				
+				
+				
+				<a class="nav-link" href="/blog/" ><i class='fa fa-blog'></i><span>Blog</span></a>
+			</li>
+			
+			
+			
+		</ul>
+	</div>
+	<div class="navbar-nav d-none d-lg-block">
+<input type="search" class="form-control td-search-input" placeholder="&#xf002; Search this site…" aria-label="Search this site…" autocomplete="off">
+
+</div>
+</nav>
+
+    </header>
+    <div class="container-fluid td-outer">
+      <div class="td-main">
+        <div class="row flex-xl-nowrap">
+          <aside class="col-12 col-md-3 col-xl-2 td-sidebar d-print-none">
+            
+<div id="td-sidebar-menu" class="td-sidebar__inner">
+  <form class="td-sidebar__search d-flex align-items-center">
+    
+<input type="search" class="form-control td-search-input" placeholder="&#xf002; Search this site…" aria-label="Search this site…" autocomplete="off">
+
+
+    <button class="btn btn-link td-sidebar__toggle d-md-none p-0 ml-3 fas fa-bars" type="button" data-toggle="collapse" data-target="#td-section-nav" aria-controls="td-docs-nav" aria-expanded="false" aria-label="Toggle section navigation">
+    </button>
+  </form>
+  <nav class="collapse td-sidebar-nav foldable-nav" id="td-section-nav">
+    <ul class="td-sidebar-nav__section pr-md-3 ul-0">
+      <li class="td-sidebar-nav__section-title td-sidebar-nav__section without-child active-path" id="m-docs-li">
+  <a href="/docs/" class="align-left pl-0 td-sidebar-link td-sidebar-link__section tree-root" id="m-docs"><span class="">docs</span></a>
+</li>
+    </ul>
+  </nav>
+</div>
+
+          </aside>
+          <aside class="d-none d-xl-block col-xl-2 td-sidebar-toc d-print-none">
+            
+  
+  
+  
+  
+  
+  
+  <div class="td-page-meta ml-2 pb-1 pt-2 mb-0">
+  
+  
+  </div>
+
+
+            
+
+
+<div class="td-toc"><nav id="TableOfContents">
+  <ul>
+    <li><a href="#一rvalue-references">（一）、Rvalue References</a>
+      <ul>
+        <li><a href="#11-左值lvalue和-右值rvalue">1.1 左值（lvalue）和 右值（rvalue）</a></li>
+      </ul>
+    </li>
+    <li><a href="#二move-语义move-semantics">（二）、move 语义（Move Semantics）</a>
+      <ul>
+        <li><a href="#21-右值引用rvalue-references">2.1 右值引用（Rvalue References）</a>
+          <ul>
+            <li><a href="#定义">定义</a></li>
+            <li><a href="#特性">特性</a></li>
+            <li><a href="#注意点">注意点</a></li>
+          </ul>
+        </li>
+        <li><a href="#22-强制-move-语义forcing-move-semantics">2.2 强制 move 语义（Forcing Move Semantics）</a>
+          <ul>
+            <li><a href="#隐藏的问题">隐藏的问题</a></li>
+          </ul>
+        </li>
+        <li><a href="#右值引用是右值吗is-an-rvalue-reference-an-rvalue">右值引用是右值吗？（Is an Rvalue Reference an Rvalue?）</a>
+          <ul>
+            <li><a href="#以上设计的原因">以上设计的原因</a>
+              <ul>
+                <li><a href="#为什么-rvalue-reference-如果拥有-name那么它本身数据-lvalue">为什么 rvalue reference 如果拥有 name，那么它本身数据 lvalue</a></li>
+                <li><a href="#为什么-rvalue-reference-如果没有-name那么它本身数据-rvalue">为什么 rvalue reference 如果没有 name，那么它本身数据 rvalue</a></li>
+              </ul>
+            </li>
+            <li><a href="#示例说明为什么要牢记if-it-has-a-name-rule">示例说明为什么要牢记<code>if-it-has-a-name rule</code></a></li>
+          </ul>
+        </li>
+        <li><a href="#move-semantics-and-compiler-optimizations">Move Semantics and Compiler Optimizations</a></li>
+      </ul>
+    </li>
+    <li><a href="#perfect-forwarding">Perfect Forwarding</a>
+      <ul>
+        <li><a href="#the-problem">The Problem</a></li>
+        <li><a href="#the-solution">The Solution</a>
+          <ul>
+            <li><a href="#rule1">rule1</a></li>
+            <li><a href="#rule2">rule2</a></li>
+            <li><a href="#solution">solution</a></li>
+            <li><a href="#场景1">场景1</a></li>
+            <li><a href="#场景2">场景2</a></li>
+          </ul>
+        </li>
+        <li><a href="#stdforward">std::forward</a>
+          <ul>
+            <li><a href="#remove_reference">remove_reference</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+    <li><a href="#todoremove_reference-这里的用处没看懂">todo：$remove_reference$ 这里的用处没看懂。。。</a>
+      <ul>
+        <li><a href="#stdmove">std::move</a></li>
+        <li><a href="#rvalue-references-and-exceptions">Rvalue References And Exceptions</a></li>
+        <li><a href="#the-case-of-the-implicit-move">The Case of the Implicit Move</a></li>
+      </ul>
+    </li>
+    <li><a href="#总结">总结</a>
+      <ul>
+        <li><a href="#一">（一）</a></li>
+        <li><a href="#二">（二）</a></li>
+        <li><a href="#三">（三）</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav></div>
+
+
+
+            
+
+	
+		
+
+
+
+  
+  
+
+	
+		
+
+
+
+  
+  
+
+	
+
+          </aside>
+          <main class="col-12 col-md-9 col-xl-8 pl-md-5" role="main">
+            
+  
+
+            <nav aria-label="breadcrumb" class="d-none d-md-block d-print-none">
+	<ol class="breadcrumb spb-1">
+		
+
+
+
+
+
+
+
+
+
+
+
+
+
+<li class="breadcrumb-item" >
+	<a href="/docs/">docs</a>
+</li>
+
+
+
+
+<li class="breadcrumb-item" >
+	<a href="/docs/71ab8b6afb1bae3df247e0286da35e0da16564ff/dev/">dev</a>
+</li>
+
+
+
+
+<li class="breadcrumb-item" >
+	<a href="/docs/71ab8b6afb1bae3df247e0286da35e0da16564ff/dev/c&#43;&#43;/">c&#43;&#43;</a>
+</li>
+
+
+
+
+<li class="breadcrumb-item active" aria-current="page">
+	<a href="/docs/71ab8b6afb1bae3df247e0286da35e0da16564ff/dev/c&#43;&#43;/rvalue_reference/">右值引用</a>
+</li>
+
+	</ol>
+</nav	>
+
+            
+<script type="text/x-mathjax-config">
+    MathJax.Hub.Config({
+		tex2jax: {
+			inlineMath: [['$','$'], ['\\(','\\)']],
+			displayMath: [['$$','$$'], ['\[','\]']],
+			processEscapes: true,
+			processEnvironments: true,
+			skipTags: ['script', 'noscript', 'style', 'textarea', 'pre'],
+			TeX: { equationNumbers: { autoNumber: "AMS" },
+				 extensions: ["AMSmath.js", "AMSsymbols.js"] }
+		  }
+    });
+</script>
+
+<script src='https://cdn.jsdelivr.net/npm/mathjax@2.7.4/MathJax.js?config=TeX-AMS-MML_HTMLorMML' async></script>
+
+<div class="td-content">
+	<h1>右值引用</h1>
+	
+	<header class="article-meta">
+		
+		
+			
+				
+
+
+			
+				
+
+
+			
+		
+		
+
+	</header>    
+	<h2 id="一rvalue-references">（一）、Rvalue References</h2>
+<p><code>Rvalue References</code> 是 C++11 标准新增的内容。rvalue References 之所以难以理解，是因为很难说清楚设计出它的原因，或者说 rvalue references 是为了解决什么问题。所以，在本文中我将不会直接介绍什么是 rvalue references。而是首先介绍有什么问题需要解决， rvalue references 又是如何解决该问题的。</p>
+<p>Rvalue references 主要解决以下两个问题：</p>
+<ul>
+<li>实现 move 语义（move semantics）</li>
+<li>完美转发（Perfect forwarding）</li>
+</ul>
+<p>如果你对以上两个问题都不了解也没有关系，本文将会介绍这两个问题。首先介绍 <code>move semantics</code>。在介绍 move semantics 之前，我首先会介绍什么是 <code>rvalue</code>，什么是 <code>lvalue</code>。这两个概念严格定义很难，但是接下来的解释对我们理解后续内容就足够了。</p>
+<h3 id="11-左值lvalue和-右值rvalue">1.1 左值（lvalue）和 右值（rvalue）</h3>
+<p>在 C 语言时代，rvalue 和 lvalue 的解释如下：</p>
+<blockquote>
+<p>lvalue 是一个 expression $e$，该 e 可以出现在赋值语句的左边或者右边。
+rvalue 只能出现在赋值语句的右边。</p>
+</blockquote>
+<p>例如：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1"> 1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2"> 2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3"> 3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4"> 4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5"> 5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6"> 6</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="7"><a style="outline: none; text-decoration:none; color:inherit" href="#7"> 7</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="8"><a style="outline: none; text-decoration:none; color:inherit" href="#8"> 8</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="9"><a style="outline: none; text-decoration:none; color:inherit" href="#9"> 9</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="10"><a style="outline: none; text-decoration:none; color:inherit" href="#10">10</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="11"><a style="outline: none; text-decoration:none; color:inherit" href="#11">11</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">  <span style="color:#458;font-weight:bold">int</span> a <span style="color:#000;font-weight:bold">=</span> <span style="color:#099">42</span>;
+  <span style="color:#458;font-weight:bold">int</span> b <span style="color:#000;font-weight:bold">=</span> <span style="color:#099">43</span>;
+
+  <span style="color:#998;font-style:italic">// a and b are both l-values:
+</span><span style="color:#998;font-style:italic"></span>  a <span style="color:#000;font-weight:bold">=</span> b; <span style="color:#998;font-style:italic">// ok
+</span><span style="color:#998;font-style:italic"></span>  b <span style="color:#000;font-weight:bold">=</span> a; <span style="color:#998;font-style:italic">// ok
+</span><span style="color:#998;font-style:italic"></span>  a <span style="color:#000;font-weight:bold">=</span> a <span style="color:#000;font-weight:bold">*</span> b; <span style="color:#998;font-style:italic">// ok
+</span><span style="color:#998;font-style:italic"></span>
+  <span style="color:#998;font-style:italic">// a * b is an rvalue:
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#458;font-weight:bold">int</span> c <span style="color:#000;font-weight:bold">=</span> a <span style="color:#000;font-weight:bold">*</span> b; <span style="color:#998;font-style:italic">// ok, rvalue on right hand side of assignment
+</span><span style="color:#998;font-style:italic"></span>  a <span style="color:#000;font-weight:bold">*</span> b <span style="color:#000;font-weight:bold">=</span> <span style="color:#099">42</span>; <span style="color:#998;font-style:italic">// error, rvalue on left hand side of assignment
+</span></code></pre></td></tr></table>
+</div>
+</div><p>在 C++ 语言中，以上定义能够直观的区分什么是 lvalue，什么是 rvalue。但是，如果是用户自定义数据类型，带入了可修改性和可分配性，那么就会导致该定义错误。我们没有必要深入探索该问题。</p>
+<p>有一个更好的定义（虽然还有不合理的地方）：</p>
+<blockquote>
+<p>lvalue：是一个有指向内存地址的变量（expression），能够允许我们通过 <code>&amp;</code> 操作获取该变量的内存地址。
+rvalue：非 lvalue 的 expression</p>
+</blockquote>
+<p>示例：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1"> 1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2"> 2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3"> 3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4"> 4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5"> 5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6"> 6</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="7"><a style="outline: none; text-decoration:none; color:inherit" href="#7"> 7</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="8"><a style="outline: none; text-decoration:none; color:inherit" href="#8"> 8</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="9"><a style="outline: none; text-decoration:none; color:inherit" href="#9"> 9</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="10"><a style="outline: none; text-decoration:none; color:inherit" href="#10">10</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="11"><a style="outline: none; text-decoration:none; color:inherit" href="#11">11</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="12"><a style="outline: none; text-decoration:none; color:inherit" href="#12">12</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="13"><a style="outline: none; text-decoration:none; color:inherit" href="#13">13</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="14"><a style="outline: none; text-decoration:none; color:inherit" href="#14">14</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="15"><a style="outline: none; text-decoration:none; color:inherit" href="#15">15</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="16"><a style="outline: none; text-decoration:none; color:inherit" href="#16">16</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">  <span style="color:#998;font-style:italic">// lvalues:
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#998;font-style:italic">//
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#458;font-weight:bold">int</span> i <span style="color:#000;font-weight:bold">=</span> <span style="color:#099">42</span>;
+  i <span style="color:#000;font-weight:bold">=</span> <span style="color:#099">43</span>; <span style="color:#998;font-style:italic">// ok, i is an lvalue
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#458;font-weight:bold">int</span><span style="color:#000;font-weight:bold">*</span> p <span style="color:#000;font-weight:bold">=</span> <span style="color:#000;font-weight:bold">&amp;</span>i; <span style="color:#998;font-style:italic">// ok, i is an lvalue
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#458;font-weight:bold">int</span><span style="color:#000;font-weight:bold">&amp;</span> foo();
+  foo() <span style="color:#000;font-weight:bold">=</span> <span style="color:#099">42</span>; <span style="color:#998;font-style:italic">// ok, foo() is an lvalue
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#458;font-weight:bold">int</span><span style="color:#000;font-weight:bold">*</span> p1 <span style="color:#000;font-weight:bold">=</span> <span style="color:#000;font-weight:bold">&amp;</span>foo(); <span style="color:#998;font-style:italic">// ok, foo() is an lvalue
+</span><span style="color:#998;font-style:italic"></span>
+  <span style="color:#998;font-style:italic">// rvalues:
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#998;font-style:italic">//
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#458;font-weight:bold">int</span> <span style="color:#900;font-weight:bold">foobar</span>();
+  <span style="color:#458;font-weight:bold">int</span> j <span style="color:#000;font-weight:bold">=</span> <span style="color:#099">0</span>;
+  j <span style="color:#000;font-weight:bold">=</span> foobar(); <span style="color:#998;font-style:italic">// ok, foobar() is an rvalue
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#458;font-weight:bold">int</span><span style="color:#000;font-weight:bold">*</span> p2 <span style="color:#000;font-weight:bold">=</span> <span style="color:#000;font-weight:bold">&amp;</span>foobar(); <span style="color:#998;font-style:italic">// error, cannot take the address of an rvalue
+</span><span style="color:#998;font-style:italic"></span>  j <span style="color:#000;font-weight:bold">=</span> <span style="color:#099">42</span>; <span style="color:#998;font-style:italic">// ok, 42 is an rvalue
+</span></code></pre></td></tr></table>
+</div>
+</div><p>当然，如果你要更严格的 lvalue、rvalue 的定义，可以参考：<a href="https://accu.org/journals/overload/12/61/kilpelainen_227/">ACCU article</a></p>
+<h2 id="二move-语义move-semantics">（二）、move 语义（Move Semantics）</h2>
+<p>假设 X 是一个 class，该 class 成员变量有指针（pointer）指向某些资源或者 handle 某些资源（handle some resource），假设这个资源为 <code>m_pResource</code>。这里所谓的资源是指需要耗费精力 construct、clone 或者 destruct。一个比较好的例子是：<code>std::vector</code>，该容器会 hold 一批 objects 存放在一系列（array of）分配好的内存中。此时，赋值操作（copy assignment）（拷贝构造（copy constructor）类似）的逻辑代码为：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6">6</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="7"><a style="outline: none; text-decoration:none; color:inherit" href="#7">7</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="8"><a style="outline: none; text-decoration:none; color:inherit" href="#8">8</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X<span style="color:#000;font-weight:bold">&amp;</span> X<span style="color:#000;font-weight:bold">::</span><span style="color:#000;font-weight:bold">operator</span><span style="color:#000;font-weight:bold">=</span>(X <span style="color:#000;font-weight:bold">const</span> <span style="color:#000;font-weight:bold">&amp;</span> rhs)
+{
+  <span style="color:#998;font-style:italic">// [...]
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#998;font-style:italic">// Make a clone of what rhs.m_pResource refers to.
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#998;font-style:italic">// Destruct the resource that m_pResource refers to. 
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#998;font-style:italic">// Attach the clone to m_pResource.
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#998;font-style:italic">// [...]
+</span><span style="color:#998;font-style:italic"></span>}
+</code></pre></td></tr></table>
+</div>
+</div><p>假设 x 用以下方式使用：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X <span style="color:#900;font-weight:bold">foo</span>();
+X x;
+<span style="color:#998;font-style:italic">// perhaps use x in various ways
+</span><span style="color:#998;font-style:italic"></span>x <span style="color:#000;font-weight:bold">=</span> foo();
+</code></pre></td></tr></table>
+</div>
+</div><p>在以上代码的最后一行，内部会执行以下操作：</p>
+<ul>
+<li>clone foo 返回的 temporary 变量中的 resource</li>
+<li>destruct x 本身的 resource，并替换为上一步 clone 的 resource</li>
+<li>destruct temporary 变量，从而释放其 resource</li>
+</ul>
+<p>很明显，在以上操作中，如果使用 <code>swap x 和 temporary 中执行资源的指针（swap resource pointer(handles) between x and temporary）</code> 会更加高效。swap 之后让 temporary 变量的 destructor 去析构 x 的原始 resource。<code>换句话说，如果以上代码的最后一行等号右边是一个 rvalue 时，我们希望赋值操作执行以下操作：</code></p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#998;font-style:italic">// [...]
+</span><span style="color:#998;font-style:italic">// swap m_pResource and rhs.m_pResource
+</span><span style="color:#998;font-style:italic">// [...] 
+</span></code></pre></td></tr></table>
+</div>
+</div><p>这就是所谓的 <code>move semantics</code>。</p>
+<p>那以上这个行为（当等号右边是 rvalue 时，执行的是 swap 操作，当等号右边是 lvalue 的时候执行的是最初的 clone 操作）在 c++11 中是怎么实现的呢？</p>
+<p>可以看到，我们这里的 copy assignment 需要根据参数类型执行不同的操作。很直观的，我们可以使用重载（overload）来实现，当等号右边是 rvalue 时，调用的是以下代码：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6">6</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X<span style="color:#000;font-weight:bold">&amp;</span> X<span style="color:#000;font-weight:bold">::</span><span style="color:#000;font-weight:bold">operator</span><span style="color:#000;font-weight:bold">=</span>(<span style="color:#000;font-weight:bold">&lt;</span>mystery type<span style="color:#000;font-weight:bold">&gt;</span> rhs)
+{
+  <span style="color:#998;font-style:italic">// [...]
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#998;font-style:italic">// swap this-&gt;m_pResource and rhs.m_pResource
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#998;font-style:italic">// [...]  
+</span><span style="color:#998;font-style:italic"></span>}
+</code></pre></td></tr></table>
+</div>
+</div><p>那么以上的 <code>mystery type</code> 应该是啥呢？
+由于我们是重载了 copy assignment operator，这里的 <code>mystery type</code> 本质也是一个引用：很明显我们都希望等号右边以引用的方式传入（而不是值传递，会多一次拷贝）。
+另外，我们希望 mystery type 拥有以下特性：</p>
+<ul>
+<li>当执行赋值运算符时，拥有两个选择：ordinary reference、或则 mystery type</li>
+<li>当传入的是 rvalue 时，更加倾向于 mystery type 对应的赋值运算符重装函数</li>
+<li>当传入的是 lvalue 时，更加倾向于 ordinary reference 对应的赋值运算符重装函数</li>
+</ul>
+<p>根据以上特性，你是否想到了 <code>rvalue reference</code> 来当作这个 mystery type 呢？下一节我们将介绍 rvalue reference。</p>
+<h3 id="21-右值引用rvalue-references">2.1 右值引用（Rvalue References）</h3>
+<h4 id="定义">定义</h4>
+<p>假如 $X$ 是一种数据类型，那么 <code>X&amp;&amp;</code> 就是 <code>X&amp; 的右值引用（Rvalue References）</code>。之前的 ordinary reference 可以称之为左值引用（lvalue reference）。</p>
+<h4 id="特性">特性</h4>
+<p>rvalue reference <strong>X&amp;&amp;</strong> 的行为和 ordinary reference <strong>X&amp;</strong> 的基本一致，有一些区别：</p>
+<blockquote>
+<p>最重要的一点是：当遇到函数重载（function overload）时，lvalue 更倾向于调用之前的 lvalue reference，rvalue 更倾向于新的 rvalue reference:</p>
+</blockquote>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6">6</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="7"><a style="outline: none; text-decoration:none; color:inherit" href="#7">7</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="8"><a style="outline: none; text-decoration:none; color:inherit" href="#8">8</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;</span> x); <span style="color:#998;font-style:italic">// lvalue reference overload
+</span><span style="color:#998;font-style:italic"></span><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;&amp;</span> x); <span style="color:#998;font-style:italic">// rvalue reference overload
+</span><span style="color:#998;font-style:italic"></span>
+X x;
+X <span style="color:#900;font-weight:bold">foobar</span>();
+
+foo(x); <span style="color:#998;font-style:italic">// argument is lvalue: calls foo(X&amp;)
+</span><span style="color:#998;font-style:italic"></span>foo(foobar()); <span style="color:#998;font-style:italic">// argument is rvalue: calls foo(X&amp;&amp;)
+</span></code></pre></td></tr></table>
+</div>
+</div><p>所以要点是：</p>
+<blockquote>
+<p>Rvalue references allow a function to branch at compile time (via overload resolution) on the condition &ldquo;Am I being called on an lvalue or an rvalue?&rdquo;</p>
+</blockquote>
+<p>按照以上方法你可以重载任何函数。但是，大多数情况下都是用于 <code>copy constructors</code> 和 <code>assignment operators</code> 来实现 <code>move semantics</code>：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6">6</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X<span style="color:#000;font-weight:bold">&amp;</span> X<span style="color:#000;font-weight:bold">::</span><span style="color:#000;font-weight:bold">operator</span><span style="color:#000;font-weight:bold">=</span>(X <span style="color:#000;font-weight:bold">const</span> <span style="color:#000;font-weight:bold">&amp;</span> rhs); <span style="color:#998;font-style:italic">// classical implementation
+</span><span style="color:#998;font-style:italic"></span>X<span style="color:#000;font-weight:bold">&amp;</span> X<span style="color:#000;font-weight:bold">::</span><span style="color:#000;font-weight:bold">operator</span><span style="color:#000;font-weight:bold">=</span>(X<span style="color:#000;font-weight:bold">&amp;&amp;</span> rhs)
+{
+  <span style="color:#998;font-style:italic">// Move semantics: exchange content between this and rhs
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#000;font-weight:bold">return</span> <span style="color:#000;font-weight:bold">*</span><span style="color:#000;font-weight:bold">this</span>;
+}
+</code></pre></td></tr></table>
+</div>
+</div><p>类似以上实现，实现 copy constructor 的方法一致。</p>
+<pre tabindex="0"><code class="language-note" data-lang="note">注意：以上 copy assignment operator 的实现中会 exchange content between this and rhs。其实，仅仅做这一步是不够的。我们将在下一节（Forcing Move Semantics）中详细介绍
+</code></pre><h4 id="注意点">注意点</h4>
+<p>如果你实现了：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;</span>);
+</code></pre></td></tr></table>
+</div>
+</div><p>但是没有实现：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;&amp;</span>);
+</code></pre></td></tr></table>
+</div>
+</div><p>那么很明显 behavior 是没有变的：foo 可以接受 lvalue，但是不能够接受 rvalue。</p>
+<p>但是，如果你实现了：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X <span style="color:#000;font-weight:bold">const</span> <span style="color:#000;font-weight:bold">&amp;</span>);
+</code></pre></td></tr></table>
+</div>
+</div><p>但是没有实现：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;&amp;</span>);
+</code></pre></td></tr></table>
+</div>
+</div><p>同样，behavior 还是没有变：foo 可以接受 lvalue 和 rvalue；但是不能够区分 rvalue 和 lvalue。所以还需要实现以下代码：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;&amp;</span>);
+</code></pre></td></tr></table>
+</div>
+</div><p>最后，如果你实现了：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;&amp;</span>);
+</code></pre></td></tr></table>
+</div>
+</div><p>但是，既没有实现：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;</span>);
+</code></pre></td></tr></table>
+</div>
+</div><p>也没有实现：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X <span style="color:#000;font-weight:bold">const</span> <span style="color:#000;font-weight:bold">&amp;</span>);
+</code></pre></td></tr></table>
+</div>
+</div><p>那个根据 c++11 标准，foo 只能够接受 rvalue 变量的参数，如果传入 lvalue 就会编译出错。</p>
+<h3 id="22-强制-move-语义forcing-move-semantics">2.2 强制 move 语义（Forcing Move Semantics）</h3>
+<p>其实，move semantics 不仅仅用于 rvalue，如果你谨慎使用，也可以使用于 lvalue。c++ std library 中的 <code>swap</code> 函数就是一个很好的例子：
+和之前一样，我们假设 $X$ 为一个 class，并且重载了 copy constructor 和 copy assignment operator 以便实现 rvalue 的 move semantics。</p>
+<p>示例一：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1"> 1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2"> 2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3"> 3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4"> 4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5"> 5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6"> 6</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="7"><a style="outline: none; text-decoration:none; color:inherit" href="#7"> 7</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="8"><a style="outline: none; text-decoration:none; color:inherit" href="#8"> 8</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="9"><a style="outline: none; text-decoration:none; color:inherit" href="#9"> 9</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="10"><a style="outline: none; text-decoration:none; color:inherit" href="#10">10</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#000;font-weight:bold">template</span><span style="color:#000;font-weight:bold">&lt;</span><span style="color:#000;font-weight:bold">class</span> <span style="color:#458;font-weight:bold">T</span><span style="color:#000;font-weight:bold">&gt;</span>
+<span style="color:#458;font-weight:bold">void</span> swap(T<span style="color:#000;font-weight:bold">&amp;</span> a, T<span style="color:#000;font-weight:bold">&amp;</span> b) 
+{ 
+  T <span style="color:#900;font-weight:bold">tmp</span>(a);
+  a <span style="color:#000;font-weight:bold">=</span> b; 
+  b <span style="color:#000;font-weight:bold">=</span> tmp; 
+} 
+
+X a, b;
+swap(a, b);
+</code></pre></td></tr></table>
+</div>
+</div><p>以上代码中，$a$、$b$ 都不是 rvalue，所以在 swap 函数中那三行代码使用的是非 move semantic 赋值和拷贝构造。但是，使用 move semantic 的也是可以的，因为我们知道：<code>“只要变量作为复制构造或赋值的源出现，该变量要么根本不再使用，要么仅用作赋值的目标。”</code></p>
+<p>在 c++11 的 std library 中的 <code>std::move</code> 可以解决该问题。 <code>std::move</code> 函数用于把它的参数转换为 rvalue（其它啥也不做）。所以在 c++11 中的 swap 函数中为：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1"> 1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2"> 2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3"> 3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4"> 4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5"> 5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6"> 6</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="7"><a style="outline: none; text-decoration:none; color:inherit" href="#7"> 7</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="8"><a style="outline: none; text-decoration:none; color:inherit" href="#8"> 8</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="9"><a style="outline: none; text-decoration:none; color:inherit" href="#9"> 9</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="10"><a style="outline: none; text-decoration:none; color:inherit" href="#10">10</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#000;font-weight:bold">template</span><span style="color:#000;font-weight:bold">&lt;</span><span style="color:#000;font-weight:bold">class</span> <span style="color:#458;font-weight:bold">T</span><span style="color:#000;font-weight:bold">&gt;</span> 
+<span style="color:#458;font-weight:bold">void</span> swap(T<span style="color:#000;font-weight:bold">&amp;</span> a, T<span style="color:#000;font-weight:bold">&amp;</span> b) 
+{ 
+  T <span style="color:#900;font-weight:bold">tmp</span>(std<span style="color:#000;font-weight:bold">::</span>move(a));
+  a <span style="color:#000;font-weight:bold">=</span> std<span style="color:#000;font-weight:bold">::</span>move(b); 
+  b <span style="color:#000;font-weight:bold">=</span> std<span style="color:#000;font-weight:bold">::</span>move(tmp);
+} 
+
+X a, b;
+swap(a, b);
+</code></pre></td></tr></table>
+</div>
+</div><p>此时，swap 函数中的三行代码使用的都是 move semantics。值得注意的是：<code>对于那些没有使用 rvalue reference 重载 copy constructor and assignment operator 的变量，以上新的 swap 函数的行为和旧的 swap 一致</code>。</p>
+<p>$std::move$ 是一个很简单的函数，此处先不介绍它是如何实现的，后面我们会重新回到这一块。</p>
+<p>正如以上例子，在能使用 $std::move$ 的场景下，尽量使用它。它会给我们带来以下好处：</p>
+<ul>
+<li>如果数据类型实现了 move 语义，那么一些通用算法和操作将会使用 move 语义，从而带来性能提升。一个很明显的例子是：<code>implace sorting</code>，因为 implace sorting 主要的操作就是 $swap$，使用了 move 语义的 $swap$ 将会带来很大的性能提升。</li>
+<li><code>STD</code> 容器通常对其中存储的数据类型有限制。通常需要其中数据满足 <code>copyability</code> 。其实，在大多数情况下满足 <code>moveability</code> 就够了。所以，现在我们可以在容器中使用<code>满足 moveability，但是不满足 copyability</code> 的数据类型（以前是不行的，以前一定要满足 copyability）。unique_pointer 就是一个非常好的例子。</li>
+</ul>
+<h4 id="隐藏的问题">隐藏的问题</h4>
+<p>在最开始的 copy assignment operator 的 rvalue reference 版本其实是有隐含问题的：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X<span style="color:#000;font-weight:bold">&amp;</span> X<span style="color:#000;font-weight:bold">::</span><span style="color:#000;font-weight:bold">operator</span><span style="color:#000;font-weight:bold">=</span>(X<span style="color:#000;font-weight:bold">&amp;&amp;</span> rhs)
+{
+  <span style="color:#998;font-style:italic">// Move semantics: exchange content between this and rhs
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#000;font-weight:bold">return</span> <span style="color:#000;font-weight:bold">*</span><span style="color:#000;font-weight:bold">this</span>;
+}
+</code></pre></td></tr></table>
+</div>
+</div><p>考虑一个简单的赋值语句：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">a <span style="color:#000;font-weight:bold">=</span> b;
+</code></pre></td></tr></table>
+</div>
+</div><p>这里会发生什么呢？</p>
+<ul>
+<li>a 对象中的内容被替换为了 b 对象<code>的拷贝</code>的内容；并期待的是对象 a 中的原有对象被 析构。</li>
+</ul>
+<p>那么如果以下代码呢？</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">a <span style="color:#000;font-weight:bold">=</span> std<span style="color:#000;font-weight:bold">::</span>move(b);
+</code></pre></td></tr></table>
+</div>
+</div><p><strong>假设 move semantics 是通过简单的 swap 实现：</strong></p>
+<p>那么以上代码中会有以下作用：<strong>a 对象的内容和 b对象的内容互换了，但是没有执行任何 destruct 操作</strong>。
+当然，当程序执行到 b 的作用域以外时，原来属于 a 对象的对象将被析构。
+那么，问题来了，如果后续代码中又把 b 当作 move 的对象（ $b=xxx$ ），那么原来属于 a 对象的内容会被再一次传递到 xxx。这样的话，就会带来不确定性，我们无法确定原本属于对象 a 的对象什么时候被析构。</p>
+<p>通过以上分析我们可以看到：<code>如果 move semantics 是通过简单的 swap 实现，那么会带来原始对象中的对象（a 中的对象）的析构不确定性</code>。
+如果该对象的析构没有什么副作用，那还好。但是有时候是有副作用的，比如：<strong>在 destruct 中进行 unlock 操作</strong>。</p>
+<p>所以，在 copy assignment operator 中，对象中任何部分的析构函数有 side effect 的话需要额外特殊处理：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1"> 1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2"> 2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3"> 3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4"> 4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5"> 5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6"> 6</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="7"><a style="outline: none; text-decoration:none; color:inherit" href="#7"> 7</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="8"><a style="outline: none; text-decoration:none; color:inherit" href="#8"> 8</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="9"><a style="outline: none; text-decoration:none; color:inherit" href="#9"> 9</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="10"><a style="outline: none; text-decoration:none; color:inherit" href="#10">10</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="11"><a style="outline: none; text-decoration:none; color:inherit" href="#11">11</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X<span style="color:#000;font-weight:bold">&amp;</span> X<span style="color:#000;font-weight:bold">::</span><span style="color:#000;font-weight:bold">operator</span><span style="color:#000;font-weight:bold">=</span>(X<span style="color:#000;font-weight:bold">&amp;&amp;</span> rhs)
+{
+
+  <span style="color:#998;font-style:italic">// Perform a cleanup that takes care of at least those parts of the
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#998;font-style:italic">// destructor that have side effects. Be sure to leave the object
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#998;font-style:italic">// in a destructible and assignable state.
+</span><span style="color:#998;font-style:italic"></span>
+  <span style="color:#998;font-style:italic">// Move semantics: exchange content between this and rhs
+</span><span style="color:#998;font-style:italic"></span>  
+  <span style="color:#000;font-weight:bold">return</span> <span style="color:#000;font-weight:bold">*</span><span style="color:#000;font-weight:bold">this</span>;
+}
+</code></pre></td></tr></table>
+</div>
+</div><p>示例二：</p>
+<h3 id="右值引用是右值吗is-an-rvalue-reference-an-rvalue">右值引用是右值吗？（Is an Rvalue Reference an Rvalue?）</h3>
+<p>和之前一样，我们假设 $X$ 重载了 rvalue reference 版本的 copy constructor 和 copy assignment operator 来实现 move semantic。现在，考虑以下代码：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;&amp;</span> x)
+{
+  X anotherX <span style="color:#000;font-weight:bold">=</span> x;
+  <span style="color:#998;font-style:italic">// ...
+</span><span style="color:#998;font-style:italic"></span>}
+</code></pre></td></tr></table>
+</div>
+</div><p>该场景中：在 $foo$ 中 $x$ 的 copy construct 被调用（<code>题外话，注意：不是调用 copy assignment operator；因为这个是在初始化的时候赋值</code>）。这个例子中 $x$ 是一个 rvalue reference，因此我们大概可以预测 $x$ 本身属于 rvalue。所以，以上 copy construct 将会调用:</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X(X<span style="color:#000;font-weight:bold">&amp;&amp;</span> rhs);
+</code></pre></td></tr></table>
+</div>
+</div><p><strong>那么，我们是否可以认为 rvalue reference 本身属于 rvalue 呢？</strong></p>
+<p>其实，以上说法是不准确的。更为准确的描述是：
+<code>rvalue reference 如果拥有 name，那么它本身数据 lvakue；如果没有 name 那么属于 rvalue</code>。</p>
+<p>所以，在以上例子中 rvalue reference 拥有名字，那么应该调用 lvalue 对应的 copy construct：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;&amp;</span> x)
+{
+  X anotherX <span style="color:#000;font-weight:bold">=</span> x; <span style="color:#998;font-style:italic">// calls X(X const &amp; rhs)
+</span><span style="color:#998;font-style:italic"></span>}
+</code></pre></td></tr></table>
+</div>
+</div><p>以下例子中 rvalue reference 没有名字，应当 rvalue 对应的 copy construct：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X<span style="color:#000;font-weight:bold">&amp;&amp;</span> goo();
+X x <span style="color:#000;font-weight:bold">=</span> goo(); <span style="color:#998;font-style:italic">// calls X(X&amp;&amp; rhs) because the thing on
+</span><span style="color:#998;font-style:italic"></span>             <span style="color:#998;font-style:italic">// the right hand side has no name
+</span></code></pre></td></tr></table>
+</div>
+</div><h4 id="以上设计的原因">以上设计的原因</h4>
+<h5 id="为什么-rvalue-reference-如果拥有-name那么它本身数据-lvalue">为什么 rvalue reference 如果拥有 name，那么它本身数据 lvalue</h5>
+<p>以上的设计的原因是什么呢？
+<code>答：允许将 move semantic 默认应用于具有 name 的事物是很危险的！！！</code></p>
+<p>例如：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">  X anotherX <span style="color:#000;font-weight:bold">=</span> x;
+  <span style="color:#998;font-style:italic">// x is still in scope!
+</span></code></pre></td></tr></table>
+</div>
+</div><p><strong>因为，上例中如果使用的 move semantic，当 move 之后，该对象后续还能够使用。但是，move semantic 的主要逻辑是：“<code>仅仅</code>当它在后续不再重要时，才能使用 move semantic”。某种意义上说：当 move 执行之后，该对象就应该立即死亡并消失。所以，才会有：“rvalue reference 如果拥有 name，那么它本身数据 lvalue”</strong>。</p>
+<h5 id="为什么-rvalue-reference-如果没有-name那么它本身数据-rvalue">为什么 rvalue reference 如果没有 name，那么它本身数据 rvalue</h5>
+<p>在以上 $goo$ 的例子中；虽然不大可能，但是技术上来说可能会出现这种情况：在示例的第二行 $goo()$ 指向一些对象，这些对象在 $goo()$ 执行move 之后依然能够访问。</p>
+<p>回想上一节的内容，这不正是我们想要的吗？**我们希望能够在 lvalue 上强制执行 move sesemantic。**也正是 “rvalue reference 如果没有 name，那么它本身数据 rvalue” 帮我们实现了这一点。</p>
+<p>这就是 <code>std::move</code> 做的事情：<code>我们通过引用的方式把参数传给 move，然后 move 什么也不做，仅仅返回 rvalue reference</code>。所以：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">std<span style="color:#000;font-weight:bold">::</span>move(x)
+</code></pre></td></tr></table>
+</div>
+</div><p>被声明为 rvalue reference，且没有名字，所以<code>是 rvalue</code>。</p>
+<p>总结：<code>std::move()</code> 把它的参数变为 rvalue（不管原参数是否为 rvalue）；实现方式是：隐藏参数名字（hiding the name）`。</p>
+<h4 id="示例说明为什么要牢记if-it-has-a-name-rule">示例说明为什么要牢记<code>if-it-has-a-name rule</code></h4>
+<p>假设我们编写了一个 $Base$ class，并且通过重载 copy construct 和 copy assignment operator 实现了 move semantic：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">Base(Base <span style="color:#000;font-weight:bold">const</span> <span style="color:#000;font-weight:bold">&amp;</span> rhs); <span style="color:#998;font-style:italic">// non-move semantics
+</span><span style="color:#998;font-style:italic"></span>Base(Base<span style="color:#000;font-weight:bold">&amp;&amp;</span> rhs); <span style="color:#998;font-style:italic">// move semantics
+</span></code></pre></td></tr></table>
+</div>
+</div><p>接着我们编写 class $Derived$，继承于基类 $Base$。为了实现 $Derived$ 对象中 $Base$ 部分的 move semantic，我们必须在 $Derived$ 类中也重载 copy construct 和 copy assignment operator。这里我们仅仅看一下 copy construct（copy assignment 类似）：</p>
+<p>lvalue 对应的 copy construct：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">Derived(Derived <span style="color:#000;font-weight:bold">const</span> <span style="color:#000;font-weight:bold">&amp;</span> rhs) 
+  <span style="color:#000;font-weight:bold">:</span> Base(rhs)
+{
+  <span style="color:#998;font-style:italic">// Derived-specific stuff
+</span><span style="color:#998;font-style:italic"></span>}
+</code></pre></td></tr></table>
+</div>
+</div><p>对于 rvalue 对应的 copy construct，如果我们不注意<code>if-it-has-a-name rule</code>，就会实现出以下有问题的代码：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">Derived(Derived<span style="color:#000;font-weight:bold">&amp;&amp;</span> rhs) 
+  <span style="color:#000;font-weight:bold">:</span> Base(rhs) <span style="color:#998;font-style:italic">// wrong: rhs is an lvalue
+</span><span style="color:#998;font-style:italic"></span>{
+  <span style="color:#998;font-style:italic">// Derived-specific stuff
+</span><span style="color:#998;font-style:italic"></span>}
+</code></pre></td></tr></table>
+</div>
+</div><p>因为 rhs 有名字，所以在 <code>Base(rhs)</code> 实际调用的是 $Base$ 中 lvalue 对应的 copy construct。如果我们想调用基类的 copy construct，正确的做法应该是：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">Derived(Derived<span style="color:#000;font-weight:bold">&amp;&amp;</span> rhs) 
+  <span style="color:#000;font-weight:bold">:</span> Base(std<span style="color:#000;font-weight:bold">::</span>move(rhs)) <span style="color:#998;font-style:italic">// good, calls Base(Base&amp;&amp; rhs)
+</span><span style="color:#998;font-style:italic"></span>{
+  <span style="color:#998;font-style:italic">// Derived-specific stuff
+</span><span style="color:#998;font-style:italic"></span>}
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="move-semantics-and-compiler-optimizations">Move Semantics and Compiler Optimizations</h3>
+<p>考虑以下函数定义：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6">6</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X <span style="color:#900;font-weight:bold">foo</span>()
+{
+  X x;
+  <span style="color:#998;font-style:italic">// perhaps do something to x
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#000;font-weight:bold">return</span> x;
+}
+</code></pre></td></tr></table>
+</div>
+</div><p>和之前一样，我们假设 $X$ 通过重载 copy construct 和 copy assignment operator 实现了 move semantic。</p>
+<p>观察以上代码，你或许会说，在 $x$ 和其返回值中存在 copy，所以我们应当使用 move semantic：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6">6</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X <span style="color:#900;font-weight:bold">foo</span>()
+{
+  X x;
+  <span style="color:#998;font-style:italic">// perhaps do something to x
+</span><span style="color:#998;font-style:italic"></span>  <span style="color:#000;font-weight:bold">return</span> std<span style="color:#000;font-weight:bold">::</span>move(x); <span style="color:#998;font-style:italic">// making it worse!
+</span><span style="color:#998;font-style:italic"></span>}
+</code></pre></td></tr></table>
+</div>
+</div><p>实际上以上代码会使得性能更差。原因是 modern compiler 会做 <code>return value optimization</code>。也就是说**并不是在函数内部定义局部变量，然后复制出来；编译器会直接在 return value 所在地方创建对象。**可以看到，编译器这么实现比使用 move semantic 更。</p>
+<p>可以看到，如果想要最优使用 rvalue reference 和 move semantic，你需要知道 modern compiler 所做的一些优化。例如：“return value optimize”、“copy elision”。想要知道更细节的内容，参考 <code>Effective Modern C++</code> 中的第 25 和 41 条。</p>
+<h2 id="perfect-forwarding">Perfect Forwarding</h2>
+<p>我们之前就提到，rvalue reference 主要解决两个问题：</p>
+<ul>
+<li>move semantic</li>
+<li>perfect forwarding</li>
+</ul>
+<p>我们已经介绍了 move semantic，从本节开始，我们将介绍 perfect forwarding。首先，哦我们将介绍什么是 perfect fording 问题。</p>
+<h3 id="the-problem">The Problem</h3>
+<p>我们来看一下以下工厂函数(factory function)：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#000;font-weight:bold">template</span><span style="color:#000;font-weight:bold">&lt;</span><span style="color:#000;font-weight:bold">typename</span> T, <span style="color:#000;font-weight:bold">typename</span> Arg<span style="color:#000;font-weight:bold">&gt;</span> 
+shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>T<span style="color:#000;font-weight:bold">&gt;</span> factory(Arg arg)
+{ 
+  <span style="color:#000;font-weight:bold">return</span> shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>T<span style="color:#000;font-weight:bold">&gt;</span>(<span style="color:#000;font-weight:bold">new</span> T(arg));
+} 
+</code></pre></td></tr></table>
+</div>
+</div><p>以上代码很明显可以看到，我们的目的是：<strong>从 factory 函数中获取参数 $arg$ 并传递给 $T$ 的构造函数</strong>。对于 $arg$ 来说理想状态下是:<strong>所有的行为应当表现为正如 factory 函数不存在一样，直接调用 $T$ 的构造函数</strong>。这就是 <code>perfect forwarding</code>。</p>
+<p>而以上代码明显是有问题的：它引入了额外的 call by value。如果构造函数需要的参数是 reference 则会有问题。</p>
+<p>一个解决方案是（也是 $boost::bind$ 选用的方案）：让外层的 $factory$ 函数接收 reference 参数：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#000;font-weight:bold">template</span><span style="color:#000;font-weight:bold">&lt;</span><span style="color:#000;font-weight:bold">typename</span> T, <span style="color:#000;font-weight:bold">typename</span> Arg<span style="color:#000;font-weight:bold">&gt;</span> 
+shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>T<span style="color:#000;font-weight:bold">&gt;</span> factory(Arg<span style="color:#000;font-weight:bold">&amp;</span> arg)
+{ 
+  <span style="color:#000;font-weight:bold">return</span> shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>T<span style="color:#000;font-weight:bold">&gt;</span>(<span style="color:#000;font-weight:bold">new</span> T(arg));
+} 
+</code></pre></td></tr></table>
+</div>
+</div><p>以上做法比最开始的做法是更优的，但是也存在一些缺陷：$factory$ 函数不能够接收 rvalue 参数：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">factory<span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&gt;</span>(hoo()); <span style="color:#998;font-style:italic">// error if hoo returns by value
+</span><span style="color:#998;font-style:italic"></span>factory<span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&gt;</span>(<span style="color:#099">41</span>); <span style="color:#998;font-style:italic">// error
+</span></code></pre></td></tr></table>
+</div>
+</div><p>以上问题可以通过重载 const reference 版本的参数：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#000;font-weight:bold">template</span><span style="color:#000;font-weight:bold">&lt;</span><span style="color:#000;font-weight:bold">typename</span> T, <span style="color:#000;font-weight:bold">typename</span> Arg<span style="color:#000;font-weight:bold">&gt;</span> 
+shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>T<span style="color:#000;font-weight:bold">&gt;</span> factory(Arg <span style="color:#000;font-weight:bold">const</span> <span style="color:#000;font-weight:bold">&amp;</span> arg)
+{ 
+  <span style="color:#000;font-weight:bold">return</span> shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>T<span style="color:#000;font-weight:bold">&gt;</span>(<span style="color:#000;font-weight:bold">new</span> T(arg));
+} 
+</code></pre></td></tr></table>
+</div>
+</div><p>以上做法有两个缺陷：</p>
+<ul>
+<li>（一）、如果 $factory$ 不止一个参数，而是多个参数；那么我们需要对每个参数实现 $const$ 版本和 $non-const$ 版本的排列组合。这对多个参数的函数的拓展性很差。</li>
+<li>（二）、这种做法阻隔了 move semantic：在 $factory$ 函数中的 $T$ 的构造函数接收的是 lvalue。所以即便 $T$ 实现了 move semantic，在该场景下永远不会触发 move semantic。</li>
+</ul>
+<p>对的，rvalue reference 可以解决这个问题；它使得可以在不使用 overload 的技术下实现 perfect forwarding。</p>
+<h3 id="the-solution">The Solution</h3>
+<p>在开始介绍 Solution 之前，我们先看一下 rvalue reference 的两个 rules。</p>
+<h4 id="rule1">rule1</h4>
+<p>rvalue reference 的第一个 rule 同样影响着 lvalue reference，在 c++11 之前是不允许取 reference 的 reference 的，比如 $A&amp; &amp;$ 将会导致编译出错。而在 c++11 之后这是允许的，引入如下<code>引用折叠规则（reference collapsing rules ）</code>：</p>
+<ul>
+<li>A&amp; &amp; becomes A&amp;</li>
+<li>A&amp; &amp;&amp; becomes A&amp;</li>
+<li>A&amp;&amp; &amp; becomes A&amp;</li>
+<li>A&amp;&amp; &amp;&amp; becomes A&amp;&amp;</li>
+</ul>
+<h4 id="rule2">rule2</h4>
+<p>如果模版函数接收的参数是模版参数的 rvalue reference 形式，那么将会有<code>特殊 template 的推倒规则(special template deduction rule)</code>：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#000;font-weight:bold">template</span><span style="color:#000;font-weight:bold">&lt;</span><span style="color:#000;font-weight:bold">typename</span> T<span style="color:#000;font-weight:bold">&gt;</span>
+<span style="color:#458;font-weight:bold">void</span> foo(T<span style="color:#000;font-weight:bold">&amp;&amp;</span>);
+</code></pre></td></tr></table>
+</div>
+</div><p>该特殊规则是：</p>
+<ul>
+<li>当 $foo$ 接收的是数据类型 $A$ 的 lvalue 形式，那么 $T$ 将会被解析为 $A&amp;$。因此，根据 rule1 的引用折叠规则，函数参数类型变为 $A&amp;$。</li>
+<li>当 $foo$ 接收的是数据类型 $A$ 的 rvalue 形式，那么 $T$ 将会被解析为 $A$。所以，函数参数类型变为 $A&amp;&amp;$。</li>
+</ul>
+<h4 id="solution">solution</h4>
+<p>根据以上两个规则，我们可以使用 rvalue reference 实现 perfect forwarding。解决方法：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#000;font-weight:bold">template</span><span style="color:#000;font-weight:bold">&lt;</span><span style="color:#000;font-weight:bold">typename</span> T, <span style="color:#000;font-weight:bold">typename</span> Arg<span style="color:#000;font-weight:bold">&gt;</span> 
+shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>T<span style="color:#000;font-weight:bold">&gt;</span> factory(Arg<span style="color:#000;font-weight:bold">&amp;&amp;</span> arg)
+{ 
+  <span style="color:#000;font-weight:bold">return</span> shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>T<span style="color:#000;font-weight:bold">&gt;</span>(<span style="color:#000;font-weight:bold">new</span> T(std<span style="color:#000;font-weight:bold">::</span>forward<span style="color:#000;font-weight:bold">&lt;</span>Arg<span style="color:#000;font-weight:bold">&gt;</span>(arg)));
+} 
+</code></pre></td></tr></table>
+</div>
+</div><p>其中的 <code>std::forward</code> 定义为：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#000;font-weight:bold">template</span><span style="color:#000;font-weight:bold">&lt;</span><span style="color:#000;font-weight:bold">class</span> <span style="color:#458;font-weight:bold">S</span><span style="color:#000;font-weight:bold">&gt;</span>
+S<span style="color:#000;font-weight:bold">&amp;&amp;</span> forward(<span style="color:#000;font-weight:bold">typename</span> remove_reference<span style="color:#000;font-weight:bold">&lt;</span>S<span style="color:#000;font-weight:bold">&gt;::</span>type<span style="color:#000;font-weight:bold">&amp;</span> a) <span style="color:#000;font-weight:bold">noexcept</span>
+{
+  <span style="color:#000;font-weight:bold">return</span> <span style="color:#000;font-weight:bold">static_cast</span><span style="color:#000;font-weight:bold">&lt;</span>S<span style="color:#000;font-weight:bold">&amp;&amp;&gt;</span>(a);
+} 
+</code></pre></td></tr></table>
+</div>
+</div><p>（暂时先不要考虑 <code>noexcept</code> 这个关键字，主要是特殊的优化考虑，让编译器知道该函数永远不会 throw exception。我们将在后续讲解）为了讲解以上函数是如何实现 perfect forwarding，我们需要分别讨论当 $factory$ 接收 rvalue 和 lvalue 的不同场景。</p>
+<h4 id="场景1">场景1</h4>
+<p>假设 $A$ 和 $X$ 为数据类型，$factory<A>$ 由 lvalue $X$ 调用：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X x;
+factory<span style="color:#000;font-weight:bold">&lt;</span>A<span style="color:#000;font-weight:bold">&gt;</span>(x);
+</code></pre></td></tr></table>
+</div>
+</div><p>根据 special template deduction rule，$factory$ 的参数 $Arg$ 将会被推导为 $X&amp;$。因此，编译器将会生成 $factory$ 和 $std::forward$ 的以下 instance：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6">6</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="7"><a style="outline: none; text-decoration:none; color:inherit" href="#7">7</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="8"><a style="outline: none; text-decoration:none; color:inherit" href="#8">8</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="9"><a style="outline: none; text-decoration:none; color:inherit" href="#9">9</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>A<span style="color:#000;font-weight:bold">&gt;</span> factory(X<span style="color:#000;font-weight:bold">&amp;</span> <span style="color:#000;font-weight:bold">&amp;&amp;</span> arg)
+{ 
+  <span style="color:#000;font-weight:bold">return</span> shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>A<span style="color:#000;font-weight:bold">&gt;</span>(<span style="color:#000;font-weight:bold">new</span> A(std<span style="color:#000;font-weight:bold">::</span>forward<span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&amp;&gt;</span>(arg)));
+} 
+
+X<span style="color:#000;font-weight:bold">&amp;</span> <span style="color:#000;font-weight:bold">&amp;&amp;</span> forward(remove_reference<span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&amp;&gt;::</span>type<span style="color:#000;font-weight:bold">&amp;</span> a) <span style="color:#000;font-weight:bold">noexcept</span>
+{
+  <span style="color:#000;font-weight:bold">return</span> <span style="color:#000;font-weight:bold">static_cast</span><span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&amp;</span> <span style="color:#000;font-weight:bold">&amp;&amp;&gt;</span>(a);
+} 
+</code></pre></td></tr></table>
+</div>
+</div><p>然后，再根据 $remove_reference$ 和 $reference collapsing rules$，以上代码将变为：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6">6</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="7"><a style="outline: none; text-decoration:none; color:inherit" href="#7">7</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="8"><a style="outline: none; text-decoration:none; color:inherit" href="#8">8</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="9"><a style="outline: none; text-decoration:none; color:inherit" href="#9">9</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>A<span style="color:#000;font-weight:bold">&gt;</span> factory(X<span style="color:#000;font-weight:bold">&amp;</span> arg)
+{ 
+  <span style="color:#000;font-weight:bold">return</span> shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>A<span style="color:#000;font-weight:bold">&gt;</span>(<span style="color:#000;font-weight:bold">new</span> A(std<span style="color:#000;font-weight:bold">::</span>forward<span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&amp;&gt;</span>(arg)));
+} 
+
+X<span style="color:#000;font-weight:bold">&amp;</span> std<span style="color:#000;font-weight:bold">::</span>forward(X<span style="color:#000;font-weight:bold">&amp;</span> a) 
+{
+  <span style="color:#000;font-weight:bold">return</span> <span style="color:#000;font-weight:bold">static_cast</span><span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&amp;&gt;</span>(a);
+} 
+</code></pre></td></tr></table>
+</div>
+</div><p>这完全符合对 lvalue 的 perfect forwarding：$factory$ 的参数顺利传给了 $A$ 的构造函数，在两次调用中都是以前的 lvalue reference。</p>
+<h4 id="场景2">场景2</h4>
+<p>接下来 $factory<A>$ 由 $X$ 的 rvalue 形式调用：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X <span style="color:#900;font-weight:bold">foo</span>();
+factory<span style="color:#000;font-weight:bold">&lt;</span>A<span style="color:#000;font-weight:bold">&gt;</span>(foo());
+</code></pre></td></tr></table>
+</div>
+</div><p>同样，根据 special template deduction rule：$factory$ 的参数 $Arg$ 将被推导为 $X$，所以编译器将会生成以下函数模版实例：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6">6</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="7"><a style="outline: none; text-decoration:none; color:inherit" href="#7">7</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="8"><a style="outline: none; text-decoration:none; color:inherit" href="#8">8</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="9"><a style="outline: none; text-decoration:none; color:inherit" href="#9">9</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>A<span style="color:#000;font-weight:bold">&gt;</span> factory(X<span style="color:#000;font-weight:bold">&amp;&amp;</span> arg)
+{ 
+  <span style="color:#000;font-weight:bold">return</span> shared_ptr<span style="color:#000;font-weight:bold">&lt;</span>A<span style="color:#000;font-weight:bold">&gt;</span>(<span style="color:#000;font-weight:bold">new</span> A(std<span style="color:#000;font-weight:bold">::</span>forward<span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&gt;</span>(arg)));
+} 
+
+X<span style="color:#000;font-weight:bold">&amp;&amp;</span> forward(X<span style="color:#000;font-weight:bold">&amp;</span> a) <span style="color:#000;font-weight:bold">noexcept</span>
+{
+  <span style="color:#000;font-weight:bold">return</span> <span style="color:#000;font-weight:bold">static_cast</span><span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&amp;&amp;&gt;</span>(a);
+} 
+</code></pre></td></tr></table>
+</div>
+</div><p>显然，这是符合 rvalue 的 perfect forwarding 的：通过两层转发，$factory$ 的参数传递给了 $A$ 的构造函数，且都是以 reference 的方式传递。而且， $A$ 的构造函数看到的参数是 rvalue。因为，传给 $A$ 的构造函数的是 rvalue reference，且没有 name，根据 <code>no-name rule</code>，该参数是 rvalue。</p>
+<p>这就意味着转发会保留 move semantic，就像 $factory$ 这个 wrapper 不存在一样。</p>
+<h3 id="stdforward">std::forward</h3>
+<p>在上一示例中 $std::forward$ 的唯一目的就是<strong>保留 move semantic</strong>。如果没有 $std::forward$ 那么代码中 $A$ 的构造函数看到的参数都是 lvalue，因为参数拥有名字。</p>
+<p>所以说：<code>$std::forward$ 的目的是: 根据 wrapper 看到的是 lvalue 或者 rvalue，转发该信息；如果是 lvalue，那么最终得到的是 lvalue；如果是 rvalue，如果是 rvalue，那么最终得到的是 rvalue。</code></p>
+<h4 id="remove_reference">remove_reference</h4>
+<p>在上例中我们使用了 <em>remove_reference</em> ，我们为什么在 $std::forward$ 使用 $remove_reference$？这个是必须的吗？其实不是必须的，我们如果使用 $S&amp;$ 来代替 $remove_reference<S>::type&amp;$ 通常来说也是可以的，但是，它仅仅当我们显示的指定 $Arg$ 为 $std::forward$ 模版参数时。而 $remove_reference$ 就是用于强制这样。</p>
+<h2 id="todoremove_reference-这里的用处没看懂">todo：$remove_reference$ 这里的用处没看懂。。。</h2>
+<h3 id="stdmove">std::move</h3>
+<p>现在，我们再回到 $std::move$ 的实现，回想下 $std::move$ 的目的是把传入的参数转变为 rvalue。实现如下：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6">6</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="7"><a style="outline: none; text-decoration:none; color:inherit" href="#7">7</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#000;font-weight:bold">template</span><span style="color:#000;font-weight:bold">&lt;</span><span style="color:#000;font-weight:bold">class</span> <span style="color:#458;font-weight:bold">T</span><span style="color:#000;font-weight:bold">&gt;</span> 
+<span style="color:#000;font-weight:bold">typename</span> remove_reference<span style="color:#000;font-weight:bold">&lt;</span>T<span style="color:#000;font-weight:bold">&gt;::</span>type<span style="color:#000;font-weight:bold">&amp;&amp;</span>
+std<span style="color:#000;font-weight:bold">::</span>move(T<span style="color:#000;font-weight:bold">&amp;&amp;</span> a) <span style="color:#000;font-weight:bold">noexcept</span>
+{
+  <span style="color:#000;font-weight:bold">typedef</span> <span style="color:#000;font-weight:bold">typename</span> remove_reference<span style="color:#000;font-weight:bold">&lt;</span>T<span style="color:#000;font-weight:bold">&gt;::</span>type<span style="color:#000;font-weight:bold">&amp;&amp;</span> RvalRef;
+  <span style="color:#000;font-weight:bold">return</span> <span style="color:#000;font-weight:bold">static_cast</span><span style="color:#000;font-weight:bold">&lt;</span>RvalRef<span style="color:#000;font-weight:bold">&gt;</span>(a);
+} 
+</code></pre></td></tr></table>
+</div>
+</div><p>假如我们以 $X$ 的 lvalue 来调用 $std::move$:</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X x;
+std<span style="color:#000;font-weight:bold">::</span>move(x);
+</code></pre></td></tr></table>
+</div>
+</div><p>根据上述的 special template deduction rule，template 参数 $T$ 将会推导为 $X&amp;$，因此，编译器会生成以下 instance：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="5"><a style="outline: none; text-decoration:none; color:inherit" href="#5">5</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="6"><a style="outline: none; text-decoration:none; color:inherit" href="#6">6</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#000;font-weight:bold">typename</span> remove_reference<span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&amp;&gt;::</span>type<span style="color:#000;font-weight:bold">&amp;&amp;</span>
+std<span style="color:#000;font-weight:bold">::</span>move(X<span style="color:#000;font-weight:bold">&amp;</span> <span style="color:#000;font-weight:bold">&amp;&amp;</span> a) <span style="color:#000;font-weight:bold">noexcept</span>
+{
+  <span style="color:#000;font-weight:bold">typedef</span> <span style="color:#000;font-weight:bold">typename</span> remove_reference<span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&amp;&gt;::</span>type<span style="color:#000;font-weight:bold">&amp;&amp;</span> RvalRef;
+  <span style="color:#000;font-weight:bold">return</span> <span style="color:#000;font-weight:bold">static_cast</span><span style="color:#000;font-weight:bold">&lt;</span>RvalRef<span style="color:#000;font-weight:bold">&gt;</span>(a);
+} 
+</code></pre></td></tr></table>
+</div>
+</div><p>接着应用 remove_reference 和 reference collapsing rules，那么代码将会是：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="3"><a style="outline: none; text-decoration:none; color:inherit" href="#3">3</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="4"><a style="outline: none; text-decoration:none; color:inherit" href="#4">4</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">X<span style="color:#000;font-weight:bold">&amp;&amp;</span> std<span style="color:#000;font-weight:bold">::</span>move(X<span style="color:#000;font-weight:bold">&amp;</span> a) <span style="color:#000;font-weight:bold">noexcept</span>
+{
+  <span style="color:#000;font-weight:bold">return</span> <span style="color:#000;font-weight:bold">static_cast</span><span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&amp;&amp;&gt;</span>(a);
+} 
+</code></pre></td></tr></table>
+</div>
+</div><p>可以看到：原本的 lvalue $x$ 将会以 lvalue reference 的类型传递给 $move$，然后 $move$ 直接转换后返回，变为了一个 uname 的 rvalue reference。</p>
+<p>对于们以 $X$ 的 rvalue 来调用 $std::move$ 的细节交给读者自行解决了，这里不再赘述。</p>
+<p>另外，值得注意的是，我们可以使用:</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#000;font-weight:bold">static_cast</span><span style="color:#000;font-weight:bold">&lt;</span>X<span style="color:#000;font-weight:bold">&amp;&amp;&gt;</span>(x);
+</code></pre></td></tr></table>
+</div>
+</div><p>来替代：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++">std<span style="color:#000;font-weight:bold">::</span>move(x);
+</code></pre></td></tr></table>
+</div>
+</div><p>但是，$std::move$ 语义上更加合理。</p>
+<h3 id="rvalue-references-and-exceptions">Rvalue References And Exceptions</h3>
+<p>当你通过重载 copy constructor 和 copy assignment operator 来实现 move semantic 时有两条建议需要记住：</p>
+<ul>
+<li>重载实现函数中不要有抛 exception 的可能；这其实很好实现，因为 move semantic 本事就是两个指向资源的指针或者 handel 的交换。</li>
+<li>使用 <code>noexception</code> 关键字。</li>
+</ul>
+<p>当你不遵守以上两个建议时，move semantic 有时候就不会遵从你的想法执行。例如：当 resize vector 时，我们希望 move semantic 起作用把原有得对象 move 到新的内存中。但是，如果你没遵守以上两个原则，就不会按照我们希望的执行。</p>
+<p>其实，只要记住以上两条就可以，不必深究。如果你确实感兴趣，可以参考 《Effective Modern C++》中的第 14 条。</p>
+<h3 id="the-case-of-the-implicit-move">The Case of the Implicit Move</h3>
+<p>为什么编译器不帮我们默认实现 move semantic 的 copy construct 和 copy assignment operator 呢？</p>
+<p>因为会导致安全问题。</p>
+<h2 id="总结">总结</h2>
+<h3 id="一">（一）</h3>
+<p>通过 override 函数，例如：</p>
+<div class="highlight"><div style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4">
+<table style="border-spacing:0;padding:0;margin:0;border:0;width:auto;overflow:auto;display:block;"><tr><td style="vertical-align:top;padding:0;margin:0;border:0;">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="1"><a style="outline: none; text-decoration:none; color:inherit" href="#1">1</a>
+</span><span style="margin-right:0.4em;padding:0 0.4em 0 0.4em;color:#7f7f7f" id="2"><a style="outline: none; text-decoration:none; color:inherit" href="#2">2</a>
+</span></code></pre></td>
+<td style="vertical-align:top;padding:0;margin:0;border:0;;width:100%">
+<pre tabindex="0" style="background-color:#fff;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-c++" data-lang="c++"><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;</span> x); <span style="color:#998;font-style:italic">// lvalue reference overload
+</span><span style="color:#998;font-style:italic"></span><span style="color:#458;font-weight:bold">void</span> <span style="color:#900;font-weight:bold">foo</span>(X<span style="color:#000;font-weight:bold">&amp;&amp;</span> x); <span style="color:#998;font-style:italic">// rvalue reference overload
+</span></code></pre></td></tr></table>
+</div>
+</div><p>可以实现编译时进行 branch：“根据 $foo$ 由 lvalue 或者 rvalue 调用不同函数”。
+实现的最多（其实是最主要的目的）的是通过重载 copy construct 和 copy assignment operator 实现 move semantic。</p>
+<h3 id="二">（二）</h3>
+<p>$std::move$ 把它的参数转变为 rvalue</p>
+<h3 id="三">（三）</h3>
+<p>通过 $std::forward$ 我们可以实现 perfect forwarding。实现方式见前文。</p>
+
+	
+	
+	
+</div>
+
+
+          </main>
+        </div>
+      </div>
+      
+<footer class="bg-dark py-5 row d-print-none">
+  <div class="container-fluid mx-sm-5">
+    <div class="row">
+      <div class="col-6 col-sm-4 text-xs-center order-sm-2">
+        
+      </div>
+      <div class="col-6 col-sm-4 text-right text-xs-center order-sm-3">
+        
+      </div>
+      <div class="col-12 col-sm-4 text-center py-2 order-sm-2">
+        <small class="text-white">&copy; 2021 RawPointer All Rights Reserved</small>
+        <small class="ml-1"><a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Privacy Policy</a></small>
+	
+      </div>
+    </div>
+  </div>
+</footer>
+
+
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js" integrity="sha384-9/reFTGAW83EW2RDu2S0VKaIzap3H66lZH81PoYlFhbGU+6BZp6G7niu735Sk7lN" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.min.js" integrity="sha384-+YQ4JLhjyBLPDQt//I+STsc9iw4uQqACwlvpslubQzn4u2UU2UFM80nGisd026JF" crossorigin="anonymous"></script>
+
+
+
+
+
+<script src='/js/tabpane-persist.js'></script>
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+
+
+
+
+<script src="/js/main.min.5c74b870c6953931a705f390a49c7e4c0a842ec5c83b24354758dd674343ed0d.js" integrity="sha256-XHS4cMaVOTGnBfOQpJx&#43;TAqELsXIOyQ1R1jdZ0ND7Q0=" crossorigin="anonymous"></script>
+
+
+
+
+  </body>
+</html>
